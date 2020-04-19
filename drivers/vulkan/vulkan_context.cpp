@@ -167,8 +167,8 @@ Error VulkanContext::_create_validation_layers() {
 	VkResult err;
 	uint32_t instance_layer_count = 0;
 	uint32_t validation_layer_count = 0;
-	const char *instance_validation_layers_alt1[] = { "VK_LAYER_LUNARG_standard_validation" };
-	const char *instance_validation_layers_alt2[] = { "VK_LAYER_GOOGLE_threading", "VK_LAYER_LUNARG_parameter_validation",
+	const char *instance_validation_layers_alt1[] = { "VK_LAYER_KHRONOS_validation" };
+	const char *instance_validation_layers_alt2[] = { "VK_LAYER_LUNARG_standard_validation", "VK_LAYER_GOOGLE_threading", "VK_LAYER_LUNARG_parameter_validation",
 		"VK_LAYER_LUNARG_object_tracker", "VK_LAYER_LUNARG_core_validation",
 		"VK_LAYER_GOOGLE_unique_objects" };
 	VkBool32 validation_found = 0;
@@ -187,7 +187,7 @@ Error VulkanContext::_create_validation_layers() {
 				instance_layer_count, instance_layers);
 		if (validation_found) {
 			enabled_layer_count = ARRAY_SIZE(instance_validation_layers_alt1);
-			enabled_layers[0] = "VK_LAYER_LUNARG_standard_validation";
+			enabled_layers[0] = "VK_LAYER_KHRONOS_validation";
 			validation_layer_count = 1;
 		} else {
 			// use alternative set of validation layers
