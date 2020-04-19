@@ -56,7 +56,9 @@ protected:
 		float direction[3];
 		float energy;
 		float color[3];
+		float size;
 		uint32_t enabled;
+		uint32_t pad[3];
 	};
 
 	struct SkySceneState {
@@ -189,6 +191,7 @@ private:
 		virtual void set_code(const String &p_Code);
 		virtual void set_default_texture_param(const StringName &p_name, RID p_texture);
 		virtual void get_param_list(List<PropertyInfo> *p_param_list) const;
+		virtual void get_instance_param_list(List<RasterizerStorage::InstanceShaderParam> *p_param_list) const;
 		virtual bool is_param_texture(const StringName &p_param) const;
 		virtual bool is_animated() const;
 		virtual bool casts_shadows() const;
@@ -866,8 +869,8 @@ public:
 	float environment_get_bg_energy(RID p_env) const;
 	int environment_get_canvas_max_layer(RID p_env) const;
 	Color environment_get_ambient_light_color(RID p_env) const;
-	RS::EnvironmentAmbientSource environment_get_ambient_light_ambient_source(RID p_env) const;
-	float environment_get_ambient_light_ambient_energy(RID p_env) const;
+	RS::EnvironmentAmbientSource environment_get_ambient_source(RID p_env) const;
+	float environment_get_ambient_light_energy(RID p_env) const;
 	float environment_get_ambient_sky_contribution(RID p_env) const;
 	RS::EnvironmentReflectionSource environment_get_reflection_source(RID p_env) const;
 	Color environment_get_ao_color(RID p_env) const;

@@ -378,6 +378,10 @@ void RasterizerSceneHighEndRD::ShaderData::get_param_list(List<PropertyInfo> *p_
 
 	for (Map<StringName, ShaderLanguage::ShaderNode::Uniform>::Element *E = uniforms.front(); E; E = E->next()) {
 
+		if (E->get().scope != ShaderLanguage::ShaderNode::Uniform::SCOPE_LOCAL) {
+			continue;
+		}
+
 		if (E->get().texture_order >= 0) {
 			order[E->get().texture_order + 100000] = E->key();
 		} else {
@@ -390,6 +394,23 @@ void RasterizerSceneHighEndRD::ShaderData::get_param_list(List<PropertyInfo> *p_
 		PropertyInfo pi = ShaderLanguage::uniform_to_property_info(uniforms[E->get()]);
 		pi.name = E->get();
 		p_param_list->push_back(pi);
+	}
+}
+
+void RasterizerSceneHighEndRD::ShaderData::get_instance_param_list(List<RasterizerStorage::InstanceShaderParam> *p_param_list) const {
+
+	for (Map<StringName, ShaderLanguage::ShaderNode::Uniform>::Element *E = uniforms.front(); E; E = E->next()) {
+
+		if (E->get().scope != ShaderLanguage::ShaderNode::Uniform::SCOPE_INSTANCE) {
+			continue;
+		}
+
+		RasterizerStorage::InstanceShaderParam p;
+		p.info = ShaderLanguage::uniform_to_property_info(E->get());
+		p.info.name = E->key(); //supply name
+		p.index = E->get().instance_index;
+		p.default_value = ShaderLanguage::constant_value_to_variant(E->get().default_value, E->get().type, E->get().hint);
+		p_param_list->push_back(p);
 	}
 }
 
@@ -828,6 +849,7 @@ void RasterizerSceneHighEndRD::_fill_instances(RenderList::Element **p_elements,
 		store_transform(Transform(e->instance->transform.basis.inverse().transposed()), id.normal_transform);
 		id.flags = 0;
 		id.mask = e->instance->layer_mask;
+		id.instance_uniforms_ofs = e->instance->instance_allocated_shader_parameters_offset >= 0 ? e->instance->instance_allocated_shader_parameters_offset : 0;
 
 		if (e->instance->base_type == RS::INSTANCE_MULTIMESH) {
 			id.flags |= INSTANCE_DATA_FLAG_MULTIMESH;
@@ -1164,7 +1186,7 @@ void RasterizerSceneHighEndRD::_setup_environment(RID p_environment, const Camer
 	} else if (is_environment(p_environment)) {
 
 		RS::EnvironmentBG env_bg = environment_get_background(p_environment);
-		RS::EnvironmentAmbientSource ambient_src = environment_get_ambient_light_ambient_source(p_environment);
+		RS::EnvironmentAmbientSource ambient_src = environment_get_ambient_source(p_environment);
 
 		float bg_energy = environment_get_bg_energy(p_environment);
 		scene_state.ubo.ambient_light_color_energy[3] = bg_energy;
@@ -1184,7 +1206,7 @@ void RasterizerSceneHighEndRD::_setup_environment(RID p_environment, const Camer
 			scene_state.ubo.use_ambient_cubemap = false;
 		} else {
 
-			float energy = environment_get_ambient_light_ambient_energy(p_environment);
+			float energy = environment_get_ambient_light_energy(p_environment);
 			Color color = environment_get_ambient_light_color(p_environment);
 			color = color.to_linear();
 			scene_state.ubo.ambient_light_color_energy[0] = color.r * energy;
@@ -1526,7 +1548,7 @@ void RasterizerSceneHighEndRD::_setup_reflections(RID *p_reflection_probe_cull_r
 			Color ambient_linear = storage->reflection_probe_get_interior_ambient(base_probe).to_linear();
 			if (is_environment(p_environment)) {
 				Color env_ambient_color = environment_get_ambient_light_color(p_environment).to_linear();
-				float env_ambient_energy = environment_get_ambient_light_ambient_energy(p_environment);
+				float env_ambient_energy = environment_get_ambient_light_energy(p_environment);
 				ambient_linear = env_ambient_color;
 				ambient_linear.r *= env_ambient_energy;
 				ambient_linear.g *= env_ambient_energy;
@@ -1784,6 +1806,7 @@ void RasterizerSceneHighEndRD::_setup_lights(RID *p_light_cull_result, int p_lig
 					sky_light_data.color[2] = light_data.color[2];
 
 					sky_light_data.enabled = true;
+					sky_light_data.size = light_data.softshadow_angle;
 					sky_scene_state.directional_light_count++;
 				}
 
@@ -2253,23 +2276,7 @@ void RasterizerSceneHighEndRD::_render_scene(RID p_render_buffer, const Transfor
 				clear_color.b *= bg_energy;
 			} break;
 			case RS::ENV_BG_SKY: {
-				RID sky = environment_get_sky(p_environment);
-				if (sky.is_valid()) {
-
-					RENDER_TIMESTAMP("Setup Sky");
-					CameraMatrix projection = p_cam_projection;
-					if (p_reflection_probe.is_valid()) {
-						CameraMatrix correction;
-						correction.set_depth_correction(true);
-						projection = correction * p_cam_projection;
-					}
-
-					_setup_sky(p_environment, p_cam_transform.origin, screen_size);
-					_update_sky(p_environment, projection, p_cam_transform);
-					radiance_uniform_set = sky_get_radiance_uniform_set_rd(sky, default_shader_rd, RADIANCE_UNIFORM_SET);
-
-					draw_sky = true;
-				}
+				draw_sky = true;
 			} break;
 			case RS::ENV_BG_CANVAS: {
 				keep_color = true;
@@ -2281,6 +2288,27 @@ void RasterizerSceneHighEndRD::_render_scene(RID p_render_buffer, const Transfor
 
 			} break;
 			default: {
+			}
+		}
+		// setup sky if used for ambient, reflections, or background
+		if (draw_sky || environment_get_reflection_source(p_environment) == RS::ENV_REFLECTION_SOURCE_SKY || environment_get_ambient_source(p_environment) == RS::ENV_AMBIENT_SOURCE_SKY) {
+			RID sky = environment_get_sky(p_environment);
+			if (sky.is_valid()) {
+
+				RENDER_TIMESTAMP("Setup Sky");
+				CameraMatrix projection = p_cam_projection;
+				if (p_reflection_probe.is_valid()) {
+					CameraMatrix correction;
+					correction.set_depth_correction(true);
+					projection = correction * p_cam_projection;
+				}
+
+				_setup_sky(p_environment, p_cam_transform.origin, screen_size);
+				_update_sky(p_environment, projection, p_cam_transform);
+				radiance_uniform_set = sky_get_radiance_uniform_set_rd(sky, default_shader_rd, RADIANCE_UNIFORM_SET);
+			} else {
+				// do not try to draw sky if invalid
+				draw_sky = false;
 			}
 		}
 	} else {
@@ -2701,6 +2729,14 @@ void RasterizerSceneHighEndRD::_update_render_base_uniform_set() {
 			uniforms.push_back(u);
 		}
 
+		{
+			RD::Uniform u;
+			u.type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 16;
+			u.ids.push_back(storage->global_variables_get_storage_buffer());
+			uniforms.push_back(u);
+		}
+
 		render_base_uniform_set = RD::get_singleton()->uniform_set_create(uniforms, default_shader_rd, SCENE_UNIFORM_SET);
 	}
 }
@@ -3077,6 +3113,8 @@ RasterizerSceneHighEndRD::RasterizerSceneHighEndRD(RasterizerStorageRD *p_storag
 
 		actions.default_filter = ShaderLanguage::FILTER_LINEAR_MIPMAP;
 		actions.default_repeat = ShaderLanguage::REPEAT_ENABLE;
+		actions.global_buffer_array_variable = "global_variables.data";
+		actions.instance_uniform_index_variable = "instances.data[instance_index].instance_uniforms_ofs";
 
 		shader.compiler.initialize(actions);
 	}
